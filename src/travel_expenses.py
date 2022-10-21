@@ -2,6 +2,7 @@
 # -*- coding:utf-8 -*-
 import logging
 import argparse
+import os
 import json
 import sys
 
@@ -18,14 +19,27 @@ KM_MAX = 20000
 #########################
 
 
+###### CUSTOM EXCP ######
+class NoHistoryForDateError(Exception):
+    """Custom exception in the case there is no content for date
+    in history file."""
+    # Disable traceback
+    sys.tracebacklimit = 0
+###### CUSTOM EXCP ######
+
+
 def main():
     """Main logic of the program."""
     args = get_args()
     command = args.command
 
+    # Set path of history to script directory:
+    hist_path = os.path.realpath(os.path.dirname(__file__)) \
+                + '/' + args.history_name
+
     # Load history file with every travels in memory:
     try:
-        history = get_history(args.history_name)
+        history = get_history(hist_path)
     except IOError as error :
         exit_gracefully(UNKNOWN, error)
     except KeyError as error:
@@ -35,12 +49,16 @@ def main():
     match args.command:
         case 'add':
             try:
-                add_travel(args.history_name, history, args.date,
+                add_travel(hist_path, history, args.date,
                            args.distance)
             except KeyError as error:
                 exit_gracefully(UNKNOWN, error)
         case 'remove':
-            pass
+            if history:
+                remove_travel(hist_path, history, args.date)
+            else:
+                exit_gracefully(
+                    UNKNOWN, 'There is no history yet, can\'t remove travel')
         case 'calculate':
             calculate(history, args.year, args.power)
 
@@ -60,11 +78,11 @@ def get_args():
     # Defines commands available:
     subparser = parser.add_subparsers(dest='command')
     add = subparser.add_parser('add', help='Add travel to history file')
-    remove = subparser.add_parser('remove',
-                                  help='Remove travel from history file')
     calculate = subparser.add_parser(
         'calculate',
         help='Return the travel expenses for the year')
+    remove = subparser.add_parser('remove',
+                                  help='Remove travel from history file')
 
     # Arguments for add command:
     add.add_argument(
@@ -86,6 +104,13 @@ def get_args():
         type=str, 
         choices=['3', '4', '5', '6', '7'],
         help='Vehicle power [3, 4, 5, 6, 7]', required=True)
+
+    # Arguments for remove command:
+    remove.add_argument(
+        '--date',
+        type=lambda d: datetime.strptime(d, '%d/%m/%Y').date(),
+        help='Date in dd/mm/yyyy format', required=True
+    )
 
     args = parser.parse_args()
 
@@ -130,13 +155,7 @@ def add_travel(filename, history, date, distance):
     # Add travel to list and write history file:
     new_travel = {'date': date.strftime('%d/%m/%Y'), 'distance': distance}
     history['travels'].append(new_travel)
-    try:
-        with open(filename, 'w', encoding='utf-8') as json_pointer:
-            json.dump(history, json_pointer, ensure_ascii=False, indent=4,    
-                      sort_keys=True)
-            logging.debug('Adding travel in history done.')
-    except IOError:
-        raise
+    write_history(filename, history)
 
 
 def calculate(history, year, vehicle_power):
@@ -179,6 +198,39 @@ def calculate(history, year, vehicle_power):
         print(f'The amount of travel expenses to declare is {expenses}€.')
     else:
         logging.warning('There is no history yet, can\'t calculate expenses.')
+
+
+def remove_travel(filename, history, date):
+    """Remove travel from history."""
+    logging.debug(f'Filename: {filename}, Date: {date}')
+
+    # Get travel for the date if exists:
+    date_str = date.strftime('%d/%m/%Y')
+    history_filter = list(filter(lambda travel: travel['date'] == date_str, 
+                                 history['travels']))
+
+    # From filter, delete in history:
+    if history_filter:
+        for date in history_filter:
+            try:
+                history['travels'].remove(date)
+            except ValueError:
+                pass
+        write_history(filename, history)
+    else:
+        raise NoHistoryForDateError(
+            f'No travel found with date {date_str}.')
+
+
+def write_history(filename, content):
+    """Write content to JSON history file."""
+    try:
+        with open(filename, 'w', encoding='utf-8') as json_pointer:
+            json.dump(content, json_pointer, ensure_ascii=False, indent=4,    
+                      sort_keys=True)
+            logging.debug('Writing in history done.')
+    except IOError:
+        raise
 
 
 def exit_gracefully(exitcode, message=None):
