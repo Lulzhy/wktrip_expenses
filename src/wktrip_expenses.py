@@ -32,10 +32,12 @@ def main():
     """Main logic of the program."""
     args = get_args()
     command = args.command
+    message = None
 
     # Set path of history to script directory:
     hist_path = os.path.realpath(os.path.dirname(__file__)) \
                 + '/' + args.history_name
+    logging.debug(f'History path: {hist_path}.')
 
     # Load history file with every travels in memory:
     try:
@@ -49,40 +51,55 @@ def main():
     match args.command:
         case 'add':
             try:
-                add_travel(hist_path, history, args.date,
+                add_day(hist_path, history, args.date,
                            args.distance)
+                message = 'New day successfully added in history.'
             except KeyError as error:
                 exit_gracefully(UNKNOWN, error)
+        case 'calculate':
+            # Set path of config to script directory:
+            config_path = os.path.realpath(os.path.dirname(__file__)) \
+                + '/config.json'
+            logging.debug(f'Config path: {config_path}.')
+
+            try:
+                config = get_config(config_path)
+            except FileNotFoundError:
+                exit_gracefully(UNKNOWN, 'Config file is missing.')
+            except IOError as error:
+                exit_gracefully(UNKNOWN, error)
+
+            calculate(history, config, args.year, args.power)
         case 'remove':
             if history:
-                remove_travel(hist_path, history, args.date)
+                remove_day(hist_path, history, args.date)
+                message = 'Day successfully removed from history.'
             else:
                 exit_gracefully(
-                    UNKNOWN, 'There is no history yet, can\'t remove travel')
-        case 'calculate':
-            calculate(history, args.year, args.power)
+                    UNKNOWN, 'There is no history yet, can\'t remove travel.')
 
     # End program:
-    exit_gracefully(OK, None)
+    exit_gracefully(OK, message)
 
 
 def get_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('-v', help='Set verbosity level: [-v|vv|vvv] ', 
+    parser.add_argument('-v', help='Set verbosity level: [-v|vv|vvv].', 
                         action='count', default=0)
-    parser.add_argument('--history_name', type=str,
-                        help='Set history filename',
-                        default='travel_expenses.json')
+    parser.add_argument('--history-name', type=str,
+                        help='Set history filename, default is work_trip.json',
+                        default='work_trip.json',
+                        dest='history_name')
     
     # Defines commands available:
     subparser = parser.add_subparsers(dest='command')
-    add = subparser.add_parser('add', help='Add travel to history file')
+    add = subparser.add_parser(
+        'add', help='Add a new day of work trip (total distance that day).')
     calculate = subparser.add_parser(
-        'calculate',
-        help='Return the travel expenses for the year')
-    remove = subparser.add_parser('remove',
-                                  help='Remove travel from history file')
+        'calculate',help='Return the amount to report to IRS for given year.')
+    remove = subparser.add_parser(
+        'remove', help='Remove a day recorded in history file.')
 
     # Arguments for add command:
     add.add_argument(
@@ -103,7 +120,8 @@ def get_args():
         '--power',
         type=str, 
         choices=['3', '4', '5', '6', '7'],
-        help='Vehicle power [3, 4, 5, 6, 7]', required=True)
+        help='Fiscal power of vehicle, possible values : [3, 4, 5, 6, 7]',
+        required=True)
 
     # Arguments for remove command:
     remove.add_argument(
@@ -117,7 +135,7 @@ def get_args():
     # Set verbosity and display args:
     logging.getLogger().setLevel([logging.ERROR, logging.WARN,
                                   logging.INFO, logging.DEBUG][args.v])
-    logging.debug(f'Parsed argument: {args}')
+    logging.debug(f'Parsed argument: {args}.')
 
     return args
 
@@ -126,20 +144,36 @@ def get_history(filename):
     """Read history file and return its content
     or an empty list if doesn't exist.
     """
-    logging.debug(f'Filename: {filename}')
+    logging.debug(f'Filename: {filename}.')
     
     try:
         with open(filename) as json_pointer:
+            logging.info('History file loaded in memory.')
             return json.load(json_pointer)
     except FileNotFoundError:
-        logging.debug('There is no history file yet.')
+        logging.warning('There is no history file yet.')
         return []
     except IOError:
         raise
 
 
-def add_travel(filename, history, date, distance):
-    """Add new travel to history."""
+def get_config(filename):
+    """Read config file and return its content ; file is required."""
+    logging.debug(f'Filename: {filename}.')
+
+    try:
+        with open(filename) as json_pointer:
+            logging.info('Config file loaded in memory.')
+            return json.load(json_pointer)
+    except FileNotFoundError:
+        logging.error('Config file is missing.')
+        raise
+    except IOError:
+        raise
+
+
+def add_day(filename, history, date, distance):
+    """Add new day to history."""
     logging.debug(f'Filename: {filename}, Date: {date}, Distance: {distance}.')
 
     date_str = date.strftime('%d/%m/%Y')
@@ -157,10 +191,12 @@ def add_travel(filename, history, date, distance):
     history['travels'].append(new_travel)
     write_history(filename, history)
 
+    logging.info('Travel recorded in history.')
 
-def calculate(history, year, vehicle_power):
+
+def calculate(history, scale, year, vehicle_power):
     """Calculate travel expenses from history for the year in argument."""
-    logging.debug(f'Year: {year}.')
+    logging.debug(f'Year: {year}, Horsepower: {vehicle_power}.')
 
     if history:
         # Get every expenses for the year from history file:
@@ -178,7 +214,7 @@ def calculate(history, year, vehicle_power):
                     cumulation += distance
             logging.debug(f'Cumulation: {cumulation}km in {year}.')
         else:
-            logging.warning(f'There is no record for year: {year}.')
+            logging.error(f'There is no record for year: {year}.')
 
         # According to power, multiply distance by corresponding coeff.:
         if cumulation <= KM_MIN:
@@ -187,20 +223,18 @@ def calculate(history, year, vehicle_power):
             index = 1
         else:
             index = 2
-        coeff = history[vehicle_power][index]['coeff']
-        term = history[vehicle_power][index]['term']
+        coeff = scale[vehicle_power][index]['coeff']
+        term = scale[vehicle_power][index]['term']
         logging.debug(
-            f'Coefficient found: {coeff} (for power: {vehicle_power} index {index}).')
-        logging.debug(
-            f'Term found: {term} (identical keys).')
+            f'Coefficient found: {coeff}, Term found: {term}.')
         
         expenses = (cumulation*coeff) + term
-        print(f'The amount of travel expenses to declare is {expenses}€.')
+        print(f'The amount to report is {expenses}€.')
     else:
-        logging.warning('There is no history yet, can\'t calculate expenses.')
+        logging.error('There is no history yet, can\'t calculate expenses.')
 
 
-def remove_travel(filename, history, date):
+def remove_day(filename, history, date):
     """Remove travel from history."""
     logging.debug(f'Filename: {filename}, Date: {date}')
 
@@ -217,6 +251,7 @@ def remove_travel(filename, history, date):
             except ValueError:
                 pass
         write_history(filename, history)
+        logging.info('Travel removed from history.')
     else:
         raise NoHistoryForDateError(
             f'No travel found with date {date_str}.')
@@ -228,7 +263,7 @@ def write_history(filename, content):
         with open(filename, 'w', encoding='utf-8') as json_pointer:
             json.dump(content, json_pointer, ensure_ascii=False, indent=4,    
                       sort_keys=True)
-            logging.debug('Writing in history done.')
+            logging.debug('History modified.')
     except IOError:
         raise
 
