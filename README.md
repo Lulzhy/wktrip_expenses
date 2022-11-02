@@ -19,6 +19,8 @@ The goal of this python script is to keep track of work trip (by car/motorbike) 
 ## config.json
 It is required to have this file beside the script as it used in calculate command. Within you can modify the scale in the case IRS would change its rules.
 
+By default the configuration is for cars, you need to manually change it if you use a motorbike.
+
 ## Examples
 - Get help
     ```console

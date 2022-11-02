@@ -212,24 +212,24 @@ def calculate(history, scale, year, vehicle_power):
                     cumulation += MAX_DISTANCE
                 else:
                     cumulation += distance
-            logging.debug(f'Cumulation: {cumulation}km in {year}.')
+                logging.debug(f'Cumulation: {cumulation}km in {year}.')
+            
+            # According to power, multiply distance by corresponding coeff.:
+            if cumulation <= KM_MIN:
+                index = 0
+            elif KM_MIN < cumulation <= KM_MAX:
+                index = 1
+            else:
+                index = 2
+            coeff = scale[vehicle_power][index]['coeff']
+            term = scale[vehicle_power][index]['term']
+            logging.debug(
+                f'Coefficient found: {coeff}, Term found: {term}.')
+            
+            expenses = (cumulation*coeff) + term
+            print(f'The amount to report is {expenses}€.')
         else:
             logging.error(f'There is no record for year: {year}.')
-
-        # According to power, multiply distance by corresponding coeff.:
-        if cumulation <= KM_MIN:
-            index = 0
-        elif KM_MIN < cumulation <= KM_MAX:
-            index = 1
-        else:
-            index = 2
-        coeff = scale[vehicle_power][index]['coeff']
-        term = scale[vehicle_power][index]['term']
-        logging.debug(
-            f'Coefficient found: {coeff}, Term found: {term}.')
-        
-        expenses = (cumulation*coeff) + term
-        print(f'The amount to report is {expenses}€.')
     else:
         logging.error('There is no history yet, can\'t calculate expenses.')
 
